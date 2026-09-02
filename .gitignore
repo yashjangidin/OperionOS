@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+Resend API Key.txt
+npm-debug.log*
+*.local
+*.tsbuildinfo
+build.log
+hts-cache/
