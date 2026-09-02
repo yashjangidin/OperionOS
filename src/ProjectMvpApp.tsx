@@ -53,6 +53,7 @@ function ProjectMvpApp() {
   const [showCreateMenu, setShowCreateMenu] = useState(false); const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const navigationReady = useRef(false);
   const remoteWorkspaceIds = useRef(new Set<string>());
+  const pendingRemoteWrites = useRef(0);
   const workspaceRef = useRef<WorkspaceRecord | null>(null);
   const restoringNavigation = useRef(false);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
@@ -119,16 +120,28 @@ function ProjectMvpApp() {
 
   useEffect(() => {
     if (!hasFirestore || !workspace || !remoteWorkspaceIds.current.has(workspace.id)) return;
-    void saveRemoteWorkspacePatch(workspace.id, { tasks: workspace.tasks, projects: workspace.projects ?? [] }).catch((reason: unknown) => {
-      console.warn("Could not sync workspace changes to Firestore.", reason);
-    });
+    pendingRemoteWrites.current += 1;
+    void saveRemoteWorkspacePatch(workspace.id, { tasks: workspace.tasks, projects: workspace.projects ?? [] })
+      .catch((reason: unknown) => console.warn("Could not sync workspace changes to Firestore.", reason))
+      .finally(() => { pendingRemoteWrites.current = Math.max(0, pendingRemoteWrites.current - 1); });
   }, [workspace]);
+
+  useEffect(() => {
+    if (user?.role !== "admin") return undefined;
+    const blockAdminDelete = (event: Event) => {
+      event.stopImmediatePropagation();
+      setError("Admins cannot delete tasks assigned by the employer.");
+    };
+    window.addEventListener("operion-delete-task", blockAdminDelete, true);
+    return () => window.removeEventListener("operion-delete-task", blockAdminDelete, true);
+  }, [user?.role]);
 
   useEffect(() => {
     if (!hasFirestore || !workspace?.id || !remoteWorkspaceIds.current.has(workspace.id)) return undefined;
     return watchRemoteWorkspace<WorkspaceRecord>(
       workspace.id,
       (remoteWorkspace) => {
+        if (pendingRemoteWrites.current > 0) return;
         const nextTasks = remoteWorkspace.tasks ?? [];
         const nextProjects = remoteWorkspace.projects ?? [];
         setWorkspaces((items) => items.map((item) => item.id === workspace.id && workspaceContentKey(workspaceRef.current) !== workspaceContentKey({ ...item, tasks: nextTasks, projects: nextProjects }) ? { ...item, tasks: nextTasks, projects: nextProjects } : item));
