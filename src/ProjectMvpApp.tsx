@@ -3,7 +3,7 @@ import {
 } from "lucide-react";
 import { type CSSProperties, type DragEvent, type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createInvitedUser, hasFirebaseConfig, signInWithEmail, signUpWithEmail, signOutFirebase, watchAuth } from "./services/firebaseAuth";
-import { createRemoteWorkspace, getRemoteUserProfile, getRemoteWorkspace, getRemoteWorkspaceMembers, hasFirestore, saveRemoteUserProfile, saveRemoteWorkspacePatch } from "./services/firestoreData";
+import { createRemoteWorkspace, getRemoteUserProfile, getRemoteWorkspace, getRemoteWorkspaceMembers, hasFirestore, saveRemoteUserProfile, saveRemoteWorkspacePatch, watchRemoteWorkspace } from "./services/firestoreData";
 
 type Role = "employer" | "admin" | "employee";
 type TaskStatus = "assigned" | "ongoing" | "completed";
@@ -53,6 +53,7 @@ function ProjectMvpApp() {
   const [showCreateMenu, setShowCreateMenu] = useState(false); const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const navigationReady = useRef(false);
   const remoteWorkspaceIds = useRef(new Set<string>());
+  const workspaceRef = useRef<WorkspaceRecord | null>(null);
   const restoringNavigation = useRef(false);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
   const [taskProjectId, setTaskProjectId] = useState<string | null | undefined>(undefined);
@@ -72,6 +73,7 @@ function ProjectMvpApp() {
   const tasks = allTasks.filter((task) => !task.isPrivate && (task.projectId ?? defaultProjectId(workspace?.id ?? "")) === project?.id);
   const selectedEmployee = members.find((item) => item.id === selectedEmployeeId) ?? members[0] ?? null;
   const selectedEmployeeTasks = selectedEmployee ? (workspace?.tasks ?? []).filter((task) => !task.isPrivate && taskHasAssignee(task, selectedEmployee.id) && (task.projectId ?? defaultProjectId(workspace?.id ?? "")) === project?.id) : [];
+  workspaceRef.current = workspace;
 
   const hydrateRemoteAccount = async (email: string) => {
     const profile = await getRemoteUserProfile<UserRecord>(email);
@@ -107,11 +109,33 @@ function ProjectMvpApp() {
   }, []);
 
   useEffect(() => {
+    if (authReady) return undefined;
+    const timeout = window.setTimeout(() => {
+      setAuthReady(true);
+      setError("We could not restore the saved session. Please sign in again.");
+    }, 8000);
+    return () => window.clearTimeout(timeout);
+  }, [authReady]);
+
+  useEffect(() => {
     if (!hasFirestore || !workspace || !remoteWorkspaceIds.current.has(workspace.id)) return;
     void saveRemoteWorkspacePatch(workspace.id, { tasks: workspace.tasks, projects: workspace.projects ?? [] }).catch((reason: unknown) => {
       console.warn("Could not sync workspace changes to Firestore.", reason);
     });
   }, [workspace]);
+
+  useEffect(() => {
+    if (!hasFirestore || !workspace?.id || !remoteWorkspaceIds.current.has(workspace.id)) return undefined;
+    return watchRemoteWorkspace<WorkspaceRecord>(
+      workspace.id,
+      (remoteWorkspace) => {
+        const nextTasks = remoteWorkspace.tasks ?? [];
+        const nextProjects = remoteWorkspace.projects ?? [];
+        setWorkspaces((items) => items.map((item) => item.id === workspace.id && workspaceContentKey(workspaceRef.current) !== workspaceContentKey({ ...item, tasks: nextTasks, projects: nextProjects }) ? { ...item, tasks: nextTasks, projects: nextProjects } : item));
+      },
+      (reason) => console.warn("Could not listen for live workspace updates.", reason),
+    );
+  }, [workspace?.id]);
 
   useEffect(() => {
     if (!hasFirestore || !workspace) return;
@@ -141,7 +165,7 @@ function ProjectMvpApp() {
   const closeDialog = () => { setDialog(null); setTaskProjectId(undefined); setError(""); };
   const signup = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const formElement = event.currentTarget; setError(""); const form = new FormData(formElement); const companyName = value(form, "companyName"), name = value(form, "employerName"), email = normalizeEmail(value(form, "email")), password = value(form, "password"); if (!companyName || !name || !email || !password) return setError("Please fill in every field."); if (findUser(users, email)) return setError("That email already exists. Please sign in instead."); const employerId = id(), workspaceId = id(); try { const firebaseUser = hasFirebaseConfig ? await signUpWithEmail(name, email, password) : null; const remoteEmployerId = firebaseUser?.uid ?? employerId; const profile = { id: remoteEmployerId, name, email, role: "employer" as const, designation: "Employer", workspaceId, companyName }; const initialWorkspace = { id: workspaceId, companyName, employerId: remoteEmployerId, tasks: [], projects: [] }; if (hasFirestore) { await createRemoteWorkspace({ ...profile, name }, initialWorkspace); remoteWorkspaceIds.current.add(workspaceId); } setUsers((items) => [...items, { ...profile, password }]); setWorkspaces((items) => [...items, initialWorkspace]); setSession({ email }); setMessage(`${companyName} workspace created.`); formElement.reset(); } catch (reason: unknown) { setError(reason instanceof Error ? reason.message : "Could not create the account."); } };
   const login = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const formElement = event.currentTarget; setError(""); const form = new FormData(formElement), email = normalizeEmail(value(form, "email")), password = value(form, "password"); try { if (hasFirebaseConfig) { const firebaseUser = await signInWithEmail(email, password); await hydrateRemoteAccount(firebaseUser.email ?? email); const remoteProfile = await getRemoteUserProfile<UserRecord>(firebaseUser.email ?? email); setMessage(`Welcome back, ${remoteProfile?.name ?? firebaseUser.displayName ?? email}.`); } else { const found = findUser(users, email); if (!found || found.password !== password) return setError("Invalid email or password."); setSession({ email }); setMessage(`Welcome back, ${found.name}.`); } formElement.reset(); } catch (reason: unknown) { setError(reason instanceof Error ? reason.message : "Invalid email or password."); } };
-  const invite = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const formElement = event.currentTarget; const form = new FormData(formElement), name = value(form, "name"), designation = value(form, "designation"), email = normalizeEmail(value(form, "email")), password = value(form, "password"); if (!workspace || !name || !designation || !email || !password) return setError("Please complete every employee field."); if (findUser(users, email)) return setError("That email already has an account. Duplicate accounts are not allowed."); try { const firebaseUser = hasFirebaseConfig ? await createInvitedUser(name, email, password) : null; const member = { id: firebaseUser?.uid ?? id(), name, email, password: hasFirebaseConfig ? "" : password, role: "employee" as const, designation, workspaceId: workspace.id, companyName: workspace.companyName }; if (hasFirestore) { const { password: _password, ...remoteProfile } = member; await saveRemoteUserProfile(remoteProfile); } setUsers((items) => [...items, member]); setMessage(`${name} has been added to the team.`); closeDialog(); formElement.reset(); } catch (reason: unknown) { setError(reason instanceof Error ? reason.message : "Could not add this employee."); } };
+  const invite = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const formElement = event.currentTarget; const form = new FormData(formElement), name = value(form, "name"), designation = value(form, "designation"), email = normalizeEmail(value(form, "email")), password = value(form, "password"); if (!workspace || !name || !designation || !email || !password) return setError("Please complete every employee field."); if (findUser(users, email)) return setError("That email already has an account. Duplicate accounts are not allowed."); const submitButton = formElement.querySelector<HTMLButtonElement>('button[type="submit"]'); if (submitButton) submitButton.disabled = true; try { const firebaseUser = hasFirebaseConfig ? await createInvitedUser(name, email, password) : null; const member = { id: firebaseUser?.uid ?? id(), name, email, password: hasFirebaseConfig ? "" : password, role: "employee" as const, designation, workspaceId: workspace.id, companyName: workspace.companyName }; if (hasFirestore) { const { password: _password, ...remoteProfile } = member; await saveRemoteUserProfile(remoteProfile); } setUsers((items) => [...items, member]); setMessage(`${name} has been added to the team.`); closeDialog(); formElement.reset(); } catch (reason: unknown) { if (submitButton) submitButton.disabled = false; setError(reason instanceof Error ? reason.message : "Could not add this employee."); } };
   const createProject = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget), name = value(form, "name"), description = value(form, "description"), links = Array.from(document.querySelectorAll<HTMLInputElement>("[data-project-link]")).map((input) => input.value.trim()).filter(Boolean); if (!workspace || !name) return setError("Add a project name first."); const files = Array.from(document.querySelectorAll<HTMLInputElement>("[data-project-file]")).flatMap((input) => Array.from(input.files ?? [])); const fileData = await Promise.all(files.map(async (file) => ({ id: id(), name: file.name, kind: file.type || "file", url: await readFileData(file) }))); const attachments = [...fileData, ...links.map((link) => ({ id: id(), name: link, kind: "link", url: link }))]; const created = { id: id(), name, description, color: COLORS[projects.length % COLORS.length], attachments }; update((item) => ({ ...item, projects: [...getProjects(item), created] })); setActiveProjectId(created.id); setViewMode("board"); setMessage(`${name} project created.`); closeDialog(); event.currentTarget.reset(); };
   const createTask = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget), title = value(form, "title"), description = value(form, "description"), employeeIds = taskProjectId === null ? [user?.id ?? ""] : form.getAll("employeeId").map(String), employeeId = employeeIds[0] ?? "", assignedDate = value(form, "assignedDate") || today(), dueDate = value(form, "dueDate"), priority = (value(form, "priority") || "medium") as TaskPriority, selectedProjectId = taskProjectId === null ? "" : value(form, "projectId") || taskProjectId || project?.id || ""; if (!workspace || !title || !description || !employeeId || !dueDate) return setError("Complete the task details and choose an assignee."); const taskId = id(), selectedProject = projects.find((item) => item.id === selectedProjectId); update((item) => ({ ...item, tasks: [{ id: taskId, title, description, employeeId, assignedDate, dueDate, status: "assigned", priority, employeeIds, createdBy: user?.id ?? "", ...(selectedProjectId ? { projectId: selectedProjectId } : {}), ...(taskProjectId === null ? { isPrivate: true } : {}) }, ...item.tasks] })); setMessage(selectedProject ? `Task added to ${selectedProject.name}.` : "Private task added."); closeDialog(); event.currentTarget.reset(); window.setTimeout(() => window.dispatchEvent(new CustomEvent("operion-open-task", { detail: taskId })), 0); };
   const moveStatus = (taskId: string, status: TaskStatus) => { update((item) => ({ ...item, tasks: item.tasks.map((task) => task.id === taskId ? { ...task, status } : task) })); setMessage(`Task moved to ${status}.`); };
@@ -186,6 +210,7 @@ function Modal({ title, onClose, children, className = "" }: { title: string; on
 function MediaPanel({ project }: { project: ProjectRecord | null }) { const attachments = project?.attachments ?? []; return <section className="media-panel">{attachments.length ? <div className="media-grid">{attachments.map((attachment) => attachment.kind === "link" && attachment.url ? <a className="media-card" href={attachment.url} target="_blank" rel="noreferrer" key={attachment.id}><span className="media-card-icon">↗</span><strong>{attachment.name}</strong><small>Link</small></a> : <div className="media-card" key={attachment.id}><span className="media-card-icon">▣</span><strong>{attachment.name}</strong><small>{attachment.kind || "File"}</small>{attachment.url ? <a className="media-download-button" href={attachment.url} download={attachment.name}>Download</a> : <small className="media-download-unavailable">Download unavailable for older upload</small>}</div>)}</div> : <div className="empty-state">No media has been added to this project yet.</div>}</section>; }
 
 function getProjects(workspace: WorkspaceRecord): ProjectRecord[] { return workspace.projects?.length ? workspace.projects : [{ id: defaultProjectId(workspace.id), name: "General work", description: "Tasks created before projects were added", color: "#e2e8f0" }]; }
+function workspaceContentKey(workspace: WorkspaceRecord | null) { return JSON.stringify({ tasks: workspace?.tasks ?? [], projects: workspace?.projects ?? [] }); }
 function defaultProjectId(workspaceId: string) { return `${workspaceId}-general`; }
 function usePersistentState<T>(key: string, fallback: T) { const [state, setState] = useState<T>(() => load(key, fallback)); useEffect(() => { window.localStorage.setItem(key, JSON.stringify(state)); }, [key, state]); return [state, setState] as const; }
 function load<T>(key: string, fallback: T) { try { const raw = window.localStorage.getItem(key); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } }

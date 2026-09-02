@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, getDoc, getFirestore, query, serverTimestamp, setDoc, where } from "firebase/firestore";
+import { collection, doc, getDocs, getDoc, getFirestore, onSnapshot, query, serverTimestamp, setDoc, where, type Unsubscribe } from "firebase/firestore";
 import { firebaseApp } from "./firebaseAuth";
 
 type RemoteRecord = Record<string, unknown>;
@@ -60,6 +60,17 @@ export async function getRemoteWorkspace<T extends RemoteRecord>(workspaceId: st
   if (!db || !workspaceId) return null;
   const snapshot = await getDoc(doc(db, "operionWorkspaces", workspaceId));
   return snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as unknown as T) : null;
+}
+
+export function watchRemoteWorkspace<T extends RemoteRecord>(workspaceId: string, onData: (workspace: T) => void, onError: (error: Error) => void): Unsubscribe {
+  if (!db || !workspaceId) return () => undefined;
+  return onSnapshot(
+    doc(db, "operionWorkspaces", workspaceId),
+    (snapshot) => {
+      if (snapshot.exists()) onData({ id: snapshot.id, ...snapshot.data() } as unknown as T);
+    },
+    onError,
+  );
 }
 
 export async function saveRemoteWorkspacePatch(workspaceId: string, patch: RemoteRecord) {
