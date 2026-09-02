@@ -1,0 +1,53 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function email() {
+      return request.auth.token.email;
+    }
+
+    function ownProfile() {
+      return signedIn() && get(/databases/$(database)/documents/operionUserProfiles/$(email())).data.workspaceId != null;
+    }
+
+    function workspaceId() {
+      return get(/databases/$(database)/documents/operionUserProfiles/$(email())).data.workspaceId;
+    }
+
+    function isWorkspaceMember(id) {
+      return signedIn() && id == workspaceId();
+    }
+
+    function isWorkspaceManager(id) {
+      return isWorkspaceMember(id) &&
+        get(/databases/$(database)/documents/operionUserProfiles/$(email())).data.role in ['employer', 'admin'];
+    }
+
+    match /operionWorkspaces/{id} {
+      allow create: if signedIn() && request.resource.data.ownerEmail == email();
+      allow read: if isWorkspaceMember(id) || (signedIn() && resource.data.ownerEmail == email());
+      allow update: if isWorkspaceManager(id) || (signedIn() && resource.data.ownerEmail == email());
+      allow delete: if signedIn() && resource.data.ownerEmail == email();
+    }
+
+    match /operionUserProfiles/{id} {
+      allow read: if signedIn() && (
+        id == email() ||
+        (resource.data.workspaceId != null && isWorkspaceMember(resource.data.workspaceId))
+      );
+      allow create: if signedIn() && (
+        id == email() ||
+        (request.resource.data.workspaceId != null && isWorkspaceManager(request.resource.data.workspaceId))
+      );
+      allow update: if signedIn() && (
+        id == email() ||
+        (resource.data.workspaceId != null && isWorkspaceManager(resource.data.workspaceId))
+      );
+      allow delete: if signedIn() && resource.data.workspaceId != null && isWorkspaceManager(resource.data.workspaceId);
+    }
+  }
+}
