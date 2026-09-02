@@ -194,6 +194,10 @@ button:hover,
   background: #eef1ea;
 }
 
+.task-summary .task-creator {
+  display: none;
+}
+
 .stack select[multiple] {
   min-height: 116px;
   padding: 8px 10px;
