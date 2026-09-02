@@ -39,6 +39,8 @@ if (hasFirebaseConfig) {
 
 export { firebaseApp };
 
+let secondaryAuthApp: FirebaseApp | null = null;
+
 export const auth = firebaseApp ? getAuth(firebaseApp) : null;
 
 if (auth) {
@@ -59,6 +61,18 @@ export async function signUpWithEmail(name: string, email: string, password: str
   } catch (error) {
     console.warn("Firebase verification email could not be sent. Continuing with OTP verification.", error);
   }
+  return result.user;
+}
+
+// Create invited accounts through a secondary Firebase app so the current employer stays signed in.
+export async function createInvitedUser(name: string, email: string, password: string) {
+  if (!firebaseApp) throw new Error("Firebase is not configured.");
+  secondaryAuthApp ??= initializeApp(firebaseConfig, "operion-invite-auth");
+  const invitedAuth = getAuth(secondaryAuthApp);
+  await setPersistence(invitedAuth, browserLocalPersistence);
+  const result = await createUserWithEmailAndPassword(invitedAuth, email, password);
+  await updateProfile(result.user, { displayName: name });
+  await signOut(invitedAuth);
   return result.user;
 }
 

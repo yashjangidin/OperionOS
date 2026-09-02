@@ -1,4 +1,4 @@
-import { doc, getDoc, getFirestore, serverTimestamp, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, getDoc, getFirestore, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { firebaseApp } from "./firebaseAuth";
 
 type RemoteRecord = Record<string, unknown>;
@@ -72,4 +72,10 @@ export async function saveRemoteWorkspacePatch(workspaceId: string, patch: Remot
     },
     { merge: true },
   );
+}
+
+export async function getRemoteWorkspaceMembers<T extends RemoteRecord>(workspaceId: string): Promise<T[]> {
+  if (!db || !workspaceId) return [];
+  const snapshots = await getDocs(query(collection(db, "operionUserProfiles"), where("workspaceId", "==", workspaceId)));
+  return snapshots.docs.map((snapshot) => ({ id: snapshot.id, ...snapshot.data() }) as unknown as T);
 }
