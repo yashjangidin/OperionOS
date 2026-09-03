@@ -622,6 +622,27 @@ button:hover,
   background: #303136;
 }
 
+.task-delete-button {
+  display: inline-grid;
+  grid-column: 5;
+  grid-row: 1;
+  place-items: center;
+  justify-self: end;
+  width: 28px;
+  height: 28px;
+  color: #aaa5ad;
+  cursor: pointer;
+  border-radius: 9px;
+  transition: color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.task-delete-button:hover,
+.task-delete-button:focus-visible {
+  color: #ff9caa;
+  background: rgb(255 110 130 / 14%);
+  transform: translateY(-1px) rotate(-6deg);
+}
+
 .list-task-check {
   display: inline-grid;
   grid-column: 1;
