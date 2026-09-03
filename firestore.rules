@@ -30,7 +30,10 @@ service cloud.firestore {
     match /operionWorkspaces/{id} {
       allow create: if signedIn() && request.resource.data.ownerEmail == email();
       allow read: if isWorkspaceMember(id) || (signedIn() && resource.data.ownerEmail == email());
-      allow update: if isWorkspaceManager(id) || (signedIn() && resource.data.ownerEmail == email());
+      // Employees may update task state, but cannot change projects or workspace ownership.
+      allow update: if isWorkspaceManager(id) ||
+        (isWorkspaceMember(id) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tasks', 'updatedAt'])) ||
+        (signedIn() && resource.data.ownerEmail == email());
       allow delete: if signedIn() && resource.data.ownerEmail == email();
     }
 

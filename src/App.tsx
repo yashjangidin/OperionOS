@@ -164,6 +164,8 @@ const AUTH_ACCOUNT_KEY = "operion-auth-account";
 const AUTH_PROFILES_KEY = "operion-auth-profiles";
 const AUTH_ROLES_KEY = "operion-auth-roles";
 const AUTH_OTP_VERIFIED_KEY = "operion-auth-otp-verified";
+const inMemoryStorage = new Map<string, unknown>();
+const celebratedIds = new Set<string>();
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -767,8 +769,8 @@ function App() {
 
   const maybeCelebrate = (id: string) => {
     const key = `operion-confetti-${id}`;
-    if (localStorage.getItem(key)) return;
-    localStorage.setItem(key, "true");
+    if (celebratedIds.has(key)) return;
+    celebratedIds.add(key);
     setShowConfetti(true);
   };
 
@@ -2008,16 +2010,11 @@ function ChoiceGrid({
 }
 
 function load<T>(key: string, fallback: T): T {
-  try {
-    const value = localStorage.getItem(key);
-    return value ? (JSON.parse(value) as T) : fallback;
-  } catch {
-    return fallback;
-  }
+  return (inMemoryStorage.get(key) as T | undefined) ?? fallback;
 }
 
 function save<T>(key: string, value: T) {
-  localStorage.setItem(key, JSON.stringify(value));
+  inMemoryStorage.set(key, value);
 }
 
 function getStoredAuthProfiles() {
@@ -2040,7 +2037,7 @@ function saveAuthAccount(account: AuthAccount) {
 }
 
 function clearActiveAuthAccount() {
-  localStorage.removeItem(AUTH_ACCOUNT_KEY);
+  inMemoryStorage.delete(AUTH_ACCOUNT_KEY);
 }
 
 function getOtpVerifiedMap() {

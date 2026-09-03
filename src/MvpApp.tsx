@@ -61,9 +61,9 @@ const TASK_COLUMNS: { status: TaskStatus; title: string }[] = [
 ];
 
 function MvpApp() {
-  const [users, setUsers] = usePersistentState<UserRecord[]>(STORAGE_KEYS.users, []);
-  const [workspaces, setWorkspaces] = usePersistentState<WorkspaceRecord[]>(STORAGE_KEYS.workspaces, []);
-  const [session, setSession] = usePersistentState<SessionRecord | null>(STORAGE_KEYS.session, null);
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
+  const [session, setSession] = useState<SessionRecord | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("signup");
   const [viewMode, setViewMode] = useState<ViewMode>("board");
   const [statusMessage, setStatusMessage] = useState("");
@@ -974,25 +974,6 @@ function TaskCard({
       </div>
     </article>
   );
-}
-
-function usePersistentState<T>(key: string, fallback: T) {
-  const [value, setValue] = useState<T>(() => loadValue(key, fallback));
-
-  useEffect(() => {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  }, [key, value]);
-
-  return [value, setValue] as const;
-}
-
-function loadValue<T>(key: string, fallback: T) {
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
 }
 
 function getString(form: FormData, name: string) {
