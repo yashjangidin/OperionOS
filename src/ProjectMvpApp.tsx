@@ -124,14 +124,6 @@ function ProjectMvpApp() {
   }, [authReady]);
 
   useEffect(() => {
-    if (!hasFirestore || !workspace || !remoteWorkspaceIds.current.has(workspace.id)) return;
-    pendingRemoteWrites.current += 1;
-    void saveRemoteWorkspacePatch(workspace.id, { tasks: workspace.tasks, projects: workspace.projects ?? [] })
-      .catch((reason: unknown) => console.warn("Could not sync workspace changes to Firestore.", reason))
-      .finally(() => { pendingRemoteWrites.current = Math.max(0, pendingRemoteWrites.current - 1); });
-  }, [workspace]);
-
-  useEffect(() => {
     if (user?.role !== "admin") return undefined;
     const blockAdminDelete = (event: Event) => {
       event.stopImmediatePropagation();
